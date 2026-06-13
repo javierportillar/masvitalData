@@ -1,0 +1,48 @@
+# Secrets — NUNCA commitear
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# DuckDB locales (se sube a R2, no al repo)
+*.duckdb
+*.duckdb.wal
+
+# Logs operativos del PC Windows
+infra/logs/*.log
+infra/logs/*.txt
+!infra/logs/.gitkeep
+
+# Backups MySQL
+*.sql.gz
+*.dump
+backups/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
