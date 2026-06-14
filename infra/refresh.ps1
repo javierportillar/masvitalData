@@ -10,7 +10,7 @@ param(
     [switch]$DryRun = $false
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $logDir = Join-Path $repoRoot "infra\logs"
 $logFile = Join-Path $logDir "refresh_$(Get-Date -Format yyyyMMdd).log"
