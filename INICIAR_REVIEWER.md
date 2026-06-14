@@ -13,35 +13,40 @@ Validás en `motoshopData/main` después del PR de Dev Back.
 **Tests obligatorios que tienen que pasar:**
 
 ```bash
-# Login admin devuelve tenants_allowed
-curl -X POST https://api.fragloesja.uk/api/auth/login \
+# 1) Login devuelve TokenPair. El claim tenants_allowed va EN el JWT, no en el body.
+TOKEN=$(curl -sS -X POST https://api.fragloesja.uk/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"FG28"}' | jq '.tenants_allowed'
+  -d '{"username":"admin","password":"FG28"}' | jq -r '.access_token')
+
+# Decodear el payload del JWT y verificar el claim tenants_allowed
+echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq '.tenants_allowed'
 # Esperado: ["motoshop","masvital"]
 
-# /api/me con X-Tenant motoshop responde con features completas
-curl https://api.fragloesja.uk/api/me \
+# 2) /api/auth/me con X-Tenant motoshop responde con features completas
+curl https://api.fragloesja.uk/api/auth/me \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-Tenant: motoshop" | jq '.enabled_features | length'
 # Esperado: >= 18
 
-# /api/me con X-Tenant masvital responde con features reducidas
-curl https://api.fragloesja.uk/api/me \
+# 3) /api/auth/me con X-Tenant masvital responde con features reducidas
+curl https://api.fragloesja.uk/api/auth/me \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-Tenant: masvital" | jq '.enabled_features | length'
 # Esperado: ~7
 
-# Cross-tenant leak — abc-detalle masvital NUNCA puede devolver SKUs motoshop
+# 4) Cross-tenant leak — abc-detalle masvital NUNCA puede devolver SKUs motoshop
 curl "https://api.fragloesja.uk/api/metrics/abc-detalle?bucket=A&limit=50" \
   -H "Authorization: Bearer $TOKEN" \
   -H "X-Tenant: masvital" | jq '.items | length'
 # Esperado: 0 (archivo masvital_gold.duckdb aún no existe)
 
-# Backward compat — frontend SIN header funciona como motoshop
+# 5) Backward compat — frontend SIN header funciona como motoshop
 curl https://api.fragloesja.uk/api/metrics/abc-segmentation \
   -H "Authorization: Bearer $TOKEN" | jq '.total_skus'
 # Esperado: > 0 (datos motoshop como siempre)
 ```
+
+> **Nota de contrato:** `POST /api/auth/login` devuelve `TokenPair` (`access_token`, `refresh_token`, `token_type`, `expires_in`). `tenants_allowed` **no** está en el body — es un claim del JWT. El frontend lo obtiene decodeando el `access_token` o (recomendado) llamando `GET /api/auth/me` con el Bearer.
 
 **Adicional:**
 - [ ] `tenants.yaml` está versionado y revisado
@@ -87,7 +92,7 @@ aws s3 ls s3://motoshop-gold/masvital_gold.duckdb --endpoint-url $R2_ENDPOINT
 curl "https://api.fragloesja.uk/api/health/data-freshness?tenant=masvital"
 # Esperado: { "age_minutes": < 60, "status": "fresh" }
 
-# /api/me con X-Tenant masvital ahora retorna datos
+# /api/metrics/inventory-summary con X-Tenant masvital ahora retorna datos
 curl https://api.fragloesja.uk/api/metrics/inventory-summary \
   -H "X-Tenant: masvital" \
   -H "Authorization: Bearer $TOKEN" | jq '.num_productos'

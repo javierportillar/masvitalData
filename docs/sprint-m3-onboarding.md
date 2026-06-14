@@ -16,16 +16,26 @@ Llevar el PC Windows de MasVital de cero a corriendo el pipeline ETL cada 30 min
 
 **Sprint M1 (backend multi-tenant) debe estar en `motoshopData/main` y en prod en `api.fragloesja.uk`.**
 
-Validación rápida:
+Validación rápida (M1 ya está mergeado en `motoshopData/main` y desplegado en `api.fragloesja.uk`):
 
 ```bash
-curl -X POST https://api.fragloesja.uk/api/auth/login \
+# 1) Login devuelve TokenPair. tenants_allowed va dentro del JWT, no en el body.
+TOKEN=$(curl -sS -X POST https://api.fragloesja.uk/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"FG28"}' | jq '.tenants_allowed'
+  -d '{"username":"admin","password":"FG28"}' | jq -r '.access_token')
+
+# 2) /api/auth/me retorna tenants_allowed y el contexto completo
+curl https://api.fragloesja.uk/api/auth/me \
+  -H "Authorization: Bearer $TOKEN" | jq '.tenants_allowed'
 # Esperado: ["motoshop","masvital"]
 ```
 
-Si no responde con eso → M1 no está listo → no empezamos M3.
+Si no responde con eso → M1 no está desplegado → no empezamos M3.
+
+> **Contrato real del login (no inventar):** `POST /api/auth/login` devuelve `TokenPair`
+> (`access_token`, `refresh_token`, `token_type`, `expires_in`). El claim
+> `tenants_allowed` vive **dentro** del `access_token` (JWT) y se lee via
+> `GET /api/auth/me` con `Authorization: Bearer <access_token>`.
 
 ---
 

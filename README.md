@@ -254,8 +254,8 @@ El backend lee el header `X-Tenant` en cada request, valida contra el claim `ten
 
 **Endpoints relevantes:**
 
-- `POST /api/auth/login` — admin/FG28 devuelve JWT con `tenants_allowed: [motoshop, masvital]`
-- `GET /api/me` — devuelve `enabled_features` según tenant activo
+- `POST /api/auth/login` — admin/FG28 devuelve `TokenPair` (`access_token`, `refresh_token`, `token_type`, `expires_in`). El `access_token` es un JWT cuyo payload incluye el claim `tenants_allowed: [motoshop, masvital]`. **Importante:** `tenants_allowed` NO viene en el body del response, está embebido en el JWT.
+- `GET /api/auth/me` — con `Authorization: Bearer <access_token>` devuelve `{ username, email, role, tenants_allowed, current_tenant, enabled_features }`. El `current_tenant` y `enabled_features` dependen del header `X-Tenant` enviado (sin header → default `motoshop`).
 - `GET /api/metrics/*` con header `X-Tenant: masvital` — sirve datos del tenant
 
 Catálogo completo: [`motoshopData/README.md §7`](https://github.com/javierportillar/motoshopData/blob/main/README.md#7--catálogo-de-endpoints-api).
@@ -505,15 +505,15 @@ sequenceDiagram
     U->>W: admin / FG28
     W->>R: POST /api/auth/login
     R->>A: POST /api/auth/login
-    A-->>R: access_token con<br/>tenants_allowed: [motoshop, masvital]
+    A-->>R: TokenPair (access_token JWT con<br/>claim tenants_allowed: [motoshop, masvital])
     R-->>W: Set-Cookie HttpOnly<br/>+ JSON {sub, role}
     W->>W: setUser + hard nav a /select-tenant
-    W->>A: GET /api/me<br/>(sin X-Tenant — neutral)
-    A-->>W: { tenants_allowed, current_tenant: null, enabled_features: {} }
+    W->>A: GET /api/auth/me<br/>Bearer <access_token><br/>(sin X-Tenant — default motoshop)
+    A-->>W: { username, role, tenants_allowed,<br/>current_tenant: "motoshop", enabled_features }
     W->>W: Render cards MotoShop + MasVital
     U->>W: Clic MasVital
     W->>W: Zustand currentTenant = masvital<br/>+ hard nav a /
-    W->>A: GET /api/me<br/>X-Tenant: masvital
+    W->>A: GET /api/auth/me<br/>Bearer + X-Tenant: masvital
     A-->>W: enabled_features para MasVital
     W-->>U: Home con sidebar verde + features filtradas
 ```
@@ -639,7 +639,7 @@ Si sos Dev W y querés arrancar ya, andá a [`INICIAR_DEV_W.md`](INICIAR_DEV_W.m
 
 - [ ] PO confirmó las 7 cosas de [`PENDIENTES.md`](PENDIENTES.md) §🟥
 - [ ] Dev Back terminó Sprint M3.3-M3.5 (pipeline + scripts PS1 poblados en este repo)
-- [ ] Sprint M1 backend multi-tenant en prod
+- [x] Sprint M1 backend multi-tenant en prod
 - [ ] Sprint M2 frontend tenant picker en prod
 
 ---
@@ -688,7 +688,7 @@ Reglas formales por rol en [`INICIAR_DEV_W.md`](INICIAR_DEV_W.md), [`INICIAR_DEV
 
 | Fase | Estado | Qué entrega |
 |---|---|---|
-| **M1 — Backend multi-tenant** | ⬜ Pendiente Dev Back | Backend en `motoshopData` acepta `X-Tenant`, lee tenants.yaml |
+| **M1 — Backend multi-tenant** | ✅ Hecho (Dev Back, jun 2026) | Backend en `motoshopData` acepta `X-Tenant`, tenants.yaml, JWT multi-tenant, DuckDB parametrizado, 47 tests. Commit `ffa5bde` en main. |
 | **M2 — Frontend tenant picker** | ⬜ Bloqueado por M1 | PWA en `motoshopData` con `/select-tenant` |
 | **M3 — Onboarding MasVital** | ⬜ Bloqueado por M1+M2 | Este repo poblado, PC corriendo, primer DuckDB en R2 |
 | **M4 — Trazabilidad cross-tenant** | ⬜ Bloqueado por M3 | `/admin/pipeline?tenant=`, `/admin/llm-cost`, audit log |
