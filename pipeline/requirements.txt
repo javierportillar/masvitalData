@@ -1,0 +1,9 @@
+# masvitalData Pipeline - dependencias pinneadas
+# Mismas versiones que motoshopData/pipeline/ para evitar drift.
+# NO incluye sentence-transformers (se instala aparte en el PC).
+duckdb==1.2.1
+pymysql==1.1.1
+boto3==1.37.0
+httpx==0.28.1
+pydantic==2.10.5
+structlog==25.1.0

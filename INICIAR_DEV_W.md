@@ -160,8 +160,8 @@ Si falta `explore_mysql_schema.py`, escribilo siguiendo el patrón documentado e
 # Cargar variables
 . .\infra\load_env.ps1   # creado por Dev Back en M3.5
 
-# Correr pipeline VERBOSE
-python pipeline\run_all.py
+# Correr pipeline VERBOSE (SIEMPRE con -m para imports relativos)
+python -m pipeline.run_all
 ```
 
 Esperá ~2-4 minutos. Salida esperada al final:
