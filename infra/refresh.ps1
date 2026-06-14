@@ -14,7 +14,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $logDir = Join-Path $repoRoot "infra\logs"
 $logFile = Join-Path $logDir "refresh_$(Get-Date -Format yyyyMMdd).log"
-$python = "python"
+$venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$python = if (Test-Path $venvPython) { $venvPython } else { "python" }
 
 # Asegurar dir de logs
 if (-not (Test-Path $logDir)) {
