@@ -3,6 +3,8 @@
 > **Para vos.** Este documento es tu única fuente operativa para configurar el PC Windows de MasVital de cero a corriendo el pipeline automático. Si seguís estos pasos en orden, en ~3-5 horas el sistema está vivo.
 >
 > **Regla operativa.** Sos el ÚNICO rol que toca el PC físico. Ni el PO ni Dev Back ni Reviewer ingresan al PC. Si necesitás aclaraciones técnicas, pedilas en el PR donde el Dev Back te dejó el código — no toques nada por intuición.
+>
+> **Qué clonás en el PC:** solo `masvitalData` (este repo). El frontend vive en [`frontfambus`](https://github.com/javierportillar/frontfambus) y corre en Vercel (cloud) — no necesitás clonarlo. El PC Windows nunca corre código de frontend.
 
 ---
 

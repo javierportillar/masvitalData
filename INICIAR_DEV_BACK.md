@@ -3,6 +3,8 @@
 > **Para vos.** Sos el responsable de que (a) el backend en `motoshopData` sea multi-tenant y (b) este repo `masvitalData` tenga el pipeline parametrizado, los scripts PS1 y la doc operativa lista para que Dev W instale en el PC sin pensar.
 >
 > **No tocás el PC físico.** Esa es responsabilidad exclusiva de Dev W.
+>
+> **No tocás el frontend.** El frontend único multi-tenant vive en [`frontfambus`](https://github.com/javierportillar/frontfambus) y es responsabilidad exclusiva del Dev Front. Coordinás contratos del API con el Dev Front via PR/issues — no escribís código en frontfambus.
 
 ---
 
