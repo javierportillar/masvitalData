@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$RepoRoot = "C:\Users\MasVital\Documents\masvitalData"
+$RepoRoot = "C:\Users\ProDesk\Documents\javdevmasv\masvitalData"
 $LogFile = "$RepoRoot\infra\logs\auto_pull.log"
 $DisableFlag = "$RepoRoot\infra\AUTO_PULL_DISABLED"
 $LockFile = "$RepoRoot\infra\auto_pull.lock"
