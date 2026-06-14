@@ -47,9 +47,10 @@ try {
         Write-Log "DryRun: python -m pipeline.run_all" "INFO"
     } else {
         Push-Location $repoRoot
-        & $python -m pipeline.run_all 2>&1 | Tee-Object -FilePath $logFile -Append
+        $output = & $python -m pipeline.run_all 2>&1
         $exitCode = $LASTEXITCODE
         Pop-Location
+        $output | ForEach-Object { Add-Content -Path $logFile -Value $_ -Encoding UTF8; Write-Host $_ }
 
         if ($exitCode -ne 0) {
             throw "Pipeline fallo con exit code $exitCode"
@@ -63,9 +64,10 @@ try {
         Write-Log "DryRun: python scripts/upload_duckdb_to_r2.py" "INFO"
     } else {
         Push-Location $repoRoot
-        & $python scripts/upload_duckdb_to_r2.py 2>&1 | Tee-Object -FilePath $logFile -Append
+        $output = & $python scripts/upload_duckdb_to_r2.py 2>&1
         $exitCode = $LASTEXITCODE
         Pop-Location
+        $output | ForEach-Object { Add-Content -Path $logFile -Value $_ -Encoding UTF8; Write-Host $_ }
 
         if ($exitCode -ne 0) {
             throw "Upload a R2 fallo con exit code $exitCode"
