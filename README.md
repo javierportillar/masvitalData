@@ -80,7 +80,13 @@ El sistema NO modifica el POS productivo de MasVital — solo lee con un usuario
 
 ## 3 · Por qué este repo existe separado
 
-`masvitalData/` es el **checkout operativo del PC Windows de MasVital**, NO un fork de la plataforma. El código backend/frontend vive en [`motoshopData`](https://github.com/javierportillar/motoshopData) — este repo solo tiene lo que ese PC necesita.
+`masvitalData/` es el **checkout operativo del PC Windows de MasVital**, NO un fork de la plataforma. La plataforma se divide en tres repos:
+
+- [`motoshopData`](https://github.com/javierportillar/motoshopData) — backend FastAPI, pipeline ETL MotoShop, infra Windows MotoShop
+- [`frontfambus`](https://github.com/javierportillar/frontfambus) — frontend único multi-tenant (Next.js, Vercel)
+- `masvitalData` (este repo) — pipeline ETL MasVital + infra Windows MasVital
+
+Este repo solo tiene lo que el PC Windows MasVital necesita.
 
 | Razón | Detalle |
 |---|---|
@@ -262,7 +268,9 @@ Catálogo completo: [`motoshopData/README.md §7`](https://github.com/javierport
 
 ### 6.5 · Frontend · Next.js 14 PWA con tenant picker
 
-Vive en `motoshopData/motoshop-app/web/`. **No hay frontend separado.**
+Vive en [`frontfambus`](https://github.com/javierportillar/frontfambus) (raíz del repo). **No hay frontend separado por tenant** — un único codebase Next.js sirve a MotoShop y a MasVital, decidiendo qué mostrar por el header `X-Tenant` que envía a la API.
+
+> **Histórico:** hasta 2026-06-14 el frontend vivía dentro de `motoshopData/motoshop-app/web/`. Se separó a su propio repo para que el ciclo de deploy del front no dependa del backend.
 
 **Flujo de entrada multi-tenant:**
 
