@@ -42,6 +42,17 @@ backups/
 Thumbs.db
 desktop.ini
 
+# Imagenes sueltas (logos / fotos del local). Se usan como insumo
+# para extraer paletas o subir a frontfambus/public/tenants/.
+# No las queremos en este repo porque no son operativas.
+*.heic
+*.HEIC
+*.png
+*.jpg
+*.jpeg
+*.webp
+.atl/
+
 # Test
 .pytest_cache/
 .coverage
