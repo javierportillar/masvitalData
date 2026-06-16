@@ -17,6 +17,7 @@ import os
 import sys
 from pathlib import Path
 
+TENANT = os.environ.get("TENANT", "masvital")
 R2_ENDPOINT = os.environ.get(
     "R2_ENDPOINT",
     "https://4bd1502b7fa3f33d1d3c45ae2d252cfd.r2.cloudflarestorage.com",
@@ -26,6 +27,7 @@ R2_SECRET = os.environ.get("R2_SECRET_ACCESS_KEY")
 R2_BUCKET = os.environ.get("R2_BUCKET", "motoshop-gold")
 R2_OBJECT_KEY = os.environ.get("R2_OBJECT_KEY", "masvital_gold.duckdb")
 LOCAL_DB_PATH = Path(os.environ.get("LOCAL_DB_PATH", "out/masvital_gold.duckdb"))
+PIPELINE_DB_PATH = Path("out/pipeline_runs.duckdb")
 
 
 def _upload_file(s3, local_path: Path, r2_key: str) -> None:
@@ -59,6 +61,7 @@ def main():
     )
 
     _upload_file(s3, LOCAL_DB_PATH, R2_OBJECT_KEY)
+    _upload_file(s3, PIPELINE_DB_PATH, f"{TENANT}_pipeline_runs.duckdb")
 
 
 if __name__ == "__main__":
