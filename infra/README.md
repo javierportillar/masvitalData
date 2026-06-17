@@ -9,8 +9,8 @@
 | Archivo | Función | Cuándo se ejecuta |
 |---|---|---|
 | `load_env.ps1` | Parsea `.env` y carga variables a la sesión PowerShell actual. | Helper invocado por todos los demás scripts |
-| `refresh.ps1` | Pipeline + upload R2 + log a `logs/refresh_YYYYMMDD.log`. | Task Scheduler cada 30 min (24/7) |
-| `setup_scheduled_tasks.ps1` | Crea/actualiza ambas tareas programadas vía COM. | Manual (correr como Admin en PC MasVital) |
+| `refresh.ps1` | Pipeline + upload R2 + log a `logs/refresh_YYYYMMDD.log`. | Task Scheduler: 30 min normal, 5 min en cierre (18:00-19:30) |
+| `setup_scheduled_tasks.ps1` | Crea/actualiza tareas programadas vía COM. | Manual (correr como Admin en PC MasVital) |
 | `auto_pull_and_apply.ps1` | `git fetch + pull` si hay commits nuevos. Detecta cambios y notifica. | Task Scheduler cada 5 min entre 06:00-20:00 |
 | `backup_mysql.ps1` | `mysqldump` con compresión gzip a `C:\Backups\MasVital\backup_YYYYMMDD.sql.gz`. Retención 14 días. | Task Scheduler 02:00 diario |
 | `check_health.ps1` | Verifica que la API esté responsive + último ETL < 60 min. | Manual o Task opcional |

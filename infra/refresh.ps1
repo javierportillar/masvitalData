@@ -1,7 +1,9 @@
 # MasVital - Pipeline Refresh (v15-style)
 #
 # Corre el pipeline + sube a R2 + loguea cada step a pipeline_runs.duckdb.
-# Disparado por Task Scheduler cada 30 min (24/7).
+# Disparado por Task Scheduler con doble trigger:
+#   - 06:00-17:59 cada 30 min (normal)
+#   - 18:00-19:30 cada 5 min  (cierre)
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File infra\refresh.ps1
