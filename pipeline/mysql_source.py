@@ -6,10 +6,13 @@ Parametrizado por env vars — NO hardcodea tenant ni nombre de BD.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
 import duckdb
+
+logger = logging.getLogger(__name__)
 
 STAGING_DIR = Path("_staging/parquet")
 
@@ -74,17 +77,30 @@ def seed_from_exports(con: duckdb.DuckDBPyConnection) -> None:
 
 def get_mysql_connection():
     """Intenta conectar a MySQL usando env vars. Devuelve None si no puede."""
+    host = os.environ.get("MYSQL_HOST", "localhost")
+    port = int(os.environ.get("MYSQL_PORT", "3306"))
+    user = os.environ.get("MYSQL_USER", "")
+    database = os.environ.get("MYSQL_DATABASE", "")
+    has_pw = "****" if os.environ.get("MYSQL_PASSWORD", "") else "VACIO"
+
+    logger.info(
+        "Conectando MySQL: %s@%s:%s/%s (password=%s)",
+        user, host, port, database, has_pw,
+    )
+
     try:
         import pymysql
         conn = pymysql.connect(
-            host=os.environ.get("MYSQL_HOST", "localhost"),
-            port=int(os.environ.get("MYSQL_PORT", "3306")),
-            user=os.environ.get("MYSQL_USER", ""),
+            host=host,
+            port=port,
+            user=user,
             password=os.environ.get("MYSQL_PASSWORD", ""),
-            database=os.environ.get("MYSQL_DATABASE", ""),
+            database=database,
             charset=os.environ.get("MYSQL_CHARSET", "latin1"),
             connect_timeout=5,
         )
+        logger.info("Conexion MySQL exitosa")
         return conn
-    except Exception:
+    except Exception as exc:
+        logger.warning("MySQL NO disponible: %s", exc)
         return None

@@ -17,12 +17,17 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+import urllib.request
+import urllib.error
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
 
 from pipeline import gold, silver
-from pipeline.mysql_source import get_mysql_connection
+from pipeline.mysql_source import get_mysql_connection, logger as mysql_logger
 from scripts.pipeline_runs_db import capture_layer_stats, start_stats_run, complete_stats_run
 
 logger = logging.getLogger(__name__)
@@ -297,8 +302,122 @@ def _build_bronze_from_silver(con: duckdb.DuckDBPyConnection) -> None:
     )
 
 
+# ── Threshold de frescura de datos ──────────────────────────────────────────
+# Si la última venta en MySQL es más vieja que esto, se logea WARNING + Telegram.
+_MAX_DATA_AGE_HOURS = 18  # tolera cierre nocturno (~19:00 → ~13:00 del día siguiente)
+
+
+def _send_telegram_alert(message: str) -> None:
+    """Envía una alerta a Telegram si el token y chat_id están configurados."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_GERENTE_CHAT_ID", "").strip()
+    if not token or not chat_id or "<COMPLETAR" in token or "<COMPLETAR" in chat_id:
+        return  # silently skip — no configurado
+    try:
+        payload = json.dumps({
+            "chat_id": chat_id,
+            "text": f"🚨 MasVital — {message}",
+            "parse_mode": "HTML",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:
+        logger.warning("Telegram alert falló: %s", exc)
+
+
+def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
+    """Verifica que las ventas en MySQL sean recientes y alerta si están viejas.
+
+    Debe llamarse DESPUÉS de que bronze_facventas exista.
+    """
+    try:
+        row = con.execute("SELECT MAX(fecfven) FROM bronze_facventas").fetchone()
+        max_date_raw = row[0] if row and row[0] else None
+    except Exception as exc:
+        logger.warning("DATA FRESHNESS: no se pudo leer bronze_facventas — %s", exc)
+        return
+
+    if max_date_raw is None:
+        logger.warning("DATA FRESHNESS: bronze_facventas está VACÍA — sin ventas en MySQL")
+        _send_telegram_alert("⚠️ No hay ventas registradas en MySQL de MasVital")
+        return
+
+    # Normalizar a datetime
+    if isinstance(max_date_raw, str):
+        max_dt = datetime.fromisoformat(max_date_raw.replace("Z", "+00:00"))
+    else:
+        max_dt = max_date_raw
+
+    # Si el datetime no tiene timezone, asumir UTC
+    if max_dt.tzinfo is None:
+        # La PC MasVital está en America/Bogota (UTC-5)
+        from datetime import timedelta, timezone as tz
+        bogota = tz(timedelta(hours=-5))
+        max_dt = max_dt.replace(tzinfo=bogota)
+
+    now = datetime.now(tz=timezone.utc)
+    delta_hours = (now - max_dt).total_seconds() / 3600
+
+    if delta_hours > _MAX_DATA_AGE_HOURS:
+        # Si pasa de 24h, es CRÍTICO
+        level = "CRÍTICO" if delta_hours > 24 else "ADVERTENCIA"
+        msg = (
+            f"DATA FRESHNESS [{level}]: Última venta en MySQL fue "
+            f"{max_date_raw} (hace {delta_hours:.1f}h) — "
+            f"el POS NO está escribiendo nuevas ventas a MySQL."
+        )
+        logger.warning(msg)
+
+        telegram_msg = (
+            f"🔴 Datos desactualizados ({delta_hours:.0f}h sin ventas nuevas). "
+            f"Última venta: {max_date_raw}. "
+            f"Revisar importación POS→MySQL en PC MasVital."
+        )
+        _send_telegram_alert(telegram_msg)
+    else:
+        logger.info(
+            "DATA FRESHNESS OK: última venta %s (hace %.1fh)",
+            max_date_raw, delta_hours,
+        )
+
+
+def _load_dotenv() -> None:
+    """Carga .env desde la raiz del repo si no están ya en el environment."""
+    # Si MYSQL_HOST ya está en env, respetar (lo cargó el PS1)
+    if os.environ.get("MYSQL_HOST", ""):
+        return
+
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        logger.warning(".env no encontrado en %s — usar env vars manualmente", env_path)
+        return
+
+    loaded = 0
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip("\"'").strip()
+        # No sobrescribir vars ya definidas
+        if key and key not in os.environ:
+            os.environ[key] = val
+            loaded += 1
+
+    logger.info(".env cargado: %d variables (desde %s)", loaded, env_path)
+
+
 def run_all(enable_stats: bool = True) -> str:
     """Pipeline completo: bronze -> silver -> gold."""
+    # ── Cargar .env ANTES de cualquier conexion ──────────────────────────
+    _load_dotenv()
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     stats_run_id = None
@@ -353,6 +472,14 @@ def run_all(enable_stats: bool = True) -> str:
         except Exception as exc:
             logger.warning("Bronze stats capture failed: %s", exc)
         con = duckdb.connect(str(OUTPUT_PATH))
+
+    # ── Data Freshness Check ────────────────────────────────────────────────
+    # Verifica que MySQL haya recibido ventas recientes.
+    # Si la última venta es muy vieja, logea WARNING y envía alerta Telegram.
+    try:
+        _check_data_freshness(con)
+    except Exception as exc:
+        logger.warning("Data freshness check error: %s", exc)
 
     # Paso 2: Silver
     logger.info("Running silver transformations...")

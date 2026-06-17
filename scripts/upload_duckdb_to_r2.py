@@ -17,13 +17,33 @@ import os
 import sys
 from pathlib import Path
 
+
+def _load_dotenv() -> None:
+    """Carga .env desde la raiz del repo si no están ya en el environment."""
+    if os.environ.get("R2_ACCESS_KEY_ID", ""):
+        return
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        print(".env no encontrado en %s" % env_path)
+        return
+    loaded = 0
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip("\"'").strip()
+        if key and key not in os.environ:
+            os.environ[key] = val
+            loaded += 1
+    print(".env cargado: %d variables (desde %s)" % (loaded, env_path))
+
 TENANT = os.environ.get("TENANT", "masvital")
 R2_ENDPOINT = os.environ.get(
     "R2_ENDPOINT",
     "https://4bd1502b7fa3f33d1d3c45ae2d252cfd.r2.cloudflarestorage.com",
 )
-R2_KEY = os.environ.get("R2_ACCESS_KEY_ID")
-R2_SECRET = os.environ.get("R2_SECRET_ACCESS_KEY")
 R2_BUCKET = os.environ.get("R2_BUCKET", "motoshop-gold")
 R2_OBJECT_KEY = os.environ.get("R2_OBJECT_KEY", "masvital_gold.duckdb")
 LOCAL_DB_PATH = Path(os.environ.get("LOCAL_DB_PATH", "out/masvital_gold.duckdb"))
@@ -41,7 +61,12 @@ def _upload_file(s3, local_path: Path, r2_key: str) -> None:
 
 
 def main():
-    if not R2_KEY or not R2_SECRET:
+    _load_dotenv()
+
+    r2_key = os.environ.get("R2_ACCESS_ID") or os.environ.get("R2_ACCESS_KEY_ID", "")
+    r2_secret = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+
+    if not r2_key or not r2_secret:
         print("ERROR: R2_ACCESS_KEY_ID y R2_SECRET_ACCESS_KEY requeridas en entorno.")
         print("Set desde .env en el PC MasVital.")
         sys.exit(1)
@@ -55,8 +80,8 @@ def main():
     s3 = boto3.client(
         "s3",
         endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_KEY,
-        aws_secret_access_key=R2_SECRET,
+        aws_access_key_id=r2_key,
+        aws_secret_access_key=r2_secret,
         region_name="auto",
     )
 
