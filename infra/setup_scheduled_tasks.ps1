@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-$RepoDir = "C:\Users\MasVital\Documents\masvitalData"
+$RepoDir = "C:\Users\ProDesk\Documents\javdevmasv\masvitalData"
 $PythonExe = Join-Path $RepoDir ".venv\Scripts\python.exe"
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ function Ensure-Task {
         $task.Settings.RestartInterval = "PT5M"
 
         # Trigger: repetición
-        $trigger = $task.Triggers.Create(1)  # TASK_TRIGGER_DAILY
+        $trigger = $task.Triggers.Create(2)  # TASK_TRIGGER_DAILY
         $trigger.StartBoundary = "$(Get-Date $StartTime -Format "yyyy-MM-dd'T'HH:mm:ss")"
         $trigger.DaysInterval = 1
         $trigger.Repetition.Interval = $RepetitionInterval
