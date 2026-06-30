@@ -261,7 +261,10 @@ def fact_inventario(con: duckdb.DuckDBPyConnection) -> None:
                 CAST(valor3 AS DOUBLE)            AS cantidad,
                 CAST(valor4 AS DOUBLE)            AS valor4,
                 CAST(valor5 AS DOUBLE)            AS valor5,
-                CAST(docfec AS DATE)              AS business_date,
+                CASE
+                    WHEN CAST(docfec AS DATE) = DATE '2000-01-20' THEN CURRENT_DATE
+                    ELSE CAST(docfec AS DATE)
+                END                               AS business_date,
                 TRIM(docnum)                      AS num_doc_referencia,
                 TRIM(nomsub)                      AS nombre_sub,
                 CAST(multiplo AS DOUBLE)          AS multiplo,
@@ -269,6 +272,9 @@ def fact_inventario(con: duckdb.DuckDBPyConnection) -> None:
                 TRIM(nomcos)                      AS nombre_centro_costo
             FROM bronze_auxinventario
             WHERE docfec IS NOT NULL
-              AND CAST(docfec AS DATE) >= DATE '2020-01-01'
+              AND (
+                  CAST(docfec AS DATE) >= DATE '2020-01-01'
+                  OR CAST(docfec AS DATE) = DATE '2000-01-20'
+              )
               AND CAST(docfec AS DATE) <= CURRENT_DATE
         """)
