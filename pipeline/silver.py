@@ -195,8 +195,9 @@ def fact_compras_detalle(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def fact_inventario(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute("DROP TABLE IF EXISTS silver_fact_inventario")
     con.execute("""
-        CREATE TABLE IF NOT EXISTS silver_fact_inventario (
+        CREATE TABLE silver_fact_inventario (
             id_inventario BIGINT,
             cod_lista VARCHAR,
             nombre_lista VARCHAR,
