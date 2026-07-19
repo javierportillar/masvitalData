@@ -21,6 +21,7 @@ import sys
 import urllib.request
 import urllib.error
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +36,14 @@ logger = logging.getLogger(__name__)
 TENANT = os.environ.get("TENANT", "masvital")
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "out"))
 OUTPUT_PATH = OUTPUT_DIR / f"{TENANT}_gold.duckdb"
+
+
+@dataclass(frozen=True)
+class BronzeBuildResult:
+    """Outcome of attempting to replace Bronze from the current MySQL snapshot."""
+
+    refreshed: bool
+    warning: str | None = None
 
 # Map MySQL tables -> bronze table names and their column aliases
 # Formato: (mysql_table, bronze_table, [(mysql_col, bronze_col), ...])
@@ -97,20 +106,48 @@ _MYSQL_BRONZE_MAP = [
     ]),
 ]
 
+_CRITICAL_MYSQL_TABLES = ("productos", "facventas", "detfventas")
 
-def _build_bronze_from_mysql(con: duckdb.DuckDBPyConnection) -> bool:
+
+def _build_bronze_from_mysql(con: duckdb.DuckDBPyConnection) -> BronzeBuildResult:
     """Lee MySQL y reconstruye tablas bronze en DuckDB.
 
-    Returns True si pudo conectar y cargar al menos productos.
+    Critical tables are checked before replacing any existing Bronze table. An
+    empty critical source therefore preserves the previous snapshot and is
+    reported to the orchestrator as a fallback instead of a fresh MySQL load.
     """
     mysql_conn = get_mysql_connection()
     if mysql_conn is None:
         logger.info("MySQL no disponible -- usando bronze existente o seed")
-        return False
+        return BronzeBuildResult(
+            refreshed=False,
+            warning="MySQL connection unavailable; existing Bronze may be reused",
+        )
 
+    transaction_started = False
     try:
         cur = mysql_conn.cursor()
         total_rows = 0
+
+        empty_critical_tables = []
+        for mysql_table in _CRITICAL_MYSQL_TABLES:
+            cur.execute(f"SELECT 1 FROM `{mysql_table}` LIMIT 1")
+            row = cur.fetchone()
+            if not row:
+                empty_critical_tables.append(mysql_table)
+
+        if empty_critical_tables:
+            warning = (
+                "Critical MySQL tables returned zero rows: "
+                f"{', '.join(empty_critical_tables)}. Existing Bronze was preserved."
+            )
+            logger.warning("MySQL bronze refresh rejected: %s", warning)
+            return BronzeBuildResult(refreshed=False, warning=warning)
+
+        # Keep the previous Bronze snapshot intact if a source changes between
+        # preflight and fetch, or if any later table fails to load.
+        con.execute("BEGIN TRANSACTION")
+        transaction_started = True
 
         for mysql_table, bronze_table, columns in _MYSQL_BRONZE_MAP:
             select_parts = []
@@ -127,6 +164,15 @@ def _build_bronze_from_mysql(con: duckdb.DuckDBPyConnection) -> bool:
             col_names = [bronze_col for _, bronze_col in columns]
 
             if not rows:
+                if mysql_table in _CRITICAL_MYSQL_TABLES:
+                    warning = (
+                        f"Critical MySQL table {mysql_table} returned zero rows "
+                        "during fetch. Existing Bronze was preserved."
+                    )
+                    con.execute("ROLLBACK")
+                    transaction_started = False
+                    logger.warning("MySQL bronze refresh rejected: %s", warning)
+                    return BronzeBuildResult(refreshed=False, warning=warning)
                 logger.info("  MySQL %s: 0 rows, skipping", mysql_table)
                 continue
 
@@ -162,11 +208,19 @@ def _build_bronze_from_mysql(con: duckdb.DuckDBPyConnection) -> bool:
             total_rows,
             max_date,
         )
-        return True
+        con.execute("COMMIT")
+        transaction_started = False
+        return BronzeBuildResult(refreshed=True)
 
     except Exception as e:
-        logger.warning("MySQL bronze refresh failed: %s -- usando bronze existente", e)
-        return False
+        if transaction_started:
+            try:
+                con.execute("ROLLBACK")
+            except Exception as rollback_exc:
+                logger.warning("DuckDB Bronze rollback failed: %s", rollback_exc)
+        warning = f"MySQL bronze refresh failed: {e}; existing Bronze may be reused"
+        logger.warning(warning)
+        return BronzeBuildResult(refreshed=False, warning=warning)
     finally:
         mysql_conn.close()
 
@@ -307,6 +361,14 @@ def _build_bronze_from_silver(con: duckdb.DuckDBPyConnection) -> None:
 _MAX_DATA_AGE_HOURS = 18  # tolera cierre nocturno (~19:00 → ~13:00 del día siguiente)
 
 
+@dataclass(frozen=True)
+class DataFreshness:
+    """Structured freshness result persisted with the pipeline run."""
+
+    status: str
+    warning: str | None = None
+
+
 def _send_telegram_alert(message: str) -> None:
     """Envía una alerta a Telegram si el token y chat_id están configurados."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -330,7 +392,7 @@ def _send_telegram_alert(message: str) -> None:
         logger.warning("Telegram alert falló: %s", exc)
 
 
-def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
+def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> DataFreshness:
     """Verifica que las ventas en MySQL sean recientes y alerta si están viejas.
 
     Debe llamarse DESPUÉS de que bronze_facventas exista.
@@ -339,13 +401,15 @@ def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
         row = con.execute("SELECT MAX(fecfven) FROM bronze_facventas").fetchone()
         max_date_raw = row[0] if row and row[0] else None
     except Exception as exc:
-        logger.warning("DATA FRESHNESS: no se pudo leer bronze_facventas — %s", exc)
-        return
+        warning = f"No se pudo leer bronze_facventas: {exc}"
+        logger.warning("DATA FRESHNESS: %s", warning)
+        return DataFreshness(status="unknown", warning=warning)
 
     if max_date_raw is None:
-        logger.warning("DATA FRESHNESS: bronze_facventas está VACÍA — sin ventas en MySQL")
+        warning = "bronze_facventas está vacía; no hay ventas disponibles"
+        logger.warning("DATA FRESHNESS: %s", warning)
         _send_telegram_alert("⚠️ No hay ventas registradas en MySQL de MasVital")
-        return
+        return DataFreshness(status="empty", warning=warning)
 
     # Normalizar a datetime
     if isinstance(max_date_raw, str):
@@ -379,11 +443,34 @@ def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
             f"Revisar importación POS→MySQL en PC MasVital."
         )
         _send_telegram_alert(telegram_msg)
+        return DataFreshness(status="stale", warning=msg)
     else:
         logger.info(
             "DATA FRESHNESS OK: última venta %s (hace %.1fh)",
             max_date_raw, delta_hours,
         )
+        return DataFreshness(status="fresh")
+
+
+def _record_bronze_source(
+    freshness: DataFreshness,
+    bronze_source: str,
+    refresh_warning: str | None = None,
+) -> DataFreshness:
+    """Downgrade freshness when Bronze was not rebuilt from MySQL this run."""
+    if bronze_source == "mysql":
+        return freshness
+
+    warning = (
+        f"Bronze was not refreshed from MySQL; source={bronze_source}. "
+        "Freshness is based on reused data, not this pipeline run."
+    )
+    if refresh_warning:
+        warning = f"{warning} {refresh_warning}"
+    if freshness.warning:
+        warning = f"{warning} {freshness.warning}"
+    logger.warning("DATA FRESHNESS: %s", warning)
+    return DataFreshness(status=bronze_source, warning=warning)
 
 
 def _load_dotenv() -> None:
@@ -434,7 +521,13 @@ def run_all(enable_stats: bool = True) -> str:
     con = duckdb.connect(str(OUTPUT_PATH))
 
     # Paso 1: Bronze desde MySQL
-    mysql_ok = _build_bronze_from_mysql(con)
+    bronze_build = _build_bronze_from_mysql(con)
+    if isinstance(bronze_build, bool):
+        # Compatibility with external test/operational monkeypatches written
+        # against the previous internal bool return contract.
+        bronze_build = BronzeBuildResult(refreshed=bronze_build)
+    mysql_ok = bronze_build.refreshed
+    bronze_source = "mysql"
 
     if not mysql_ok:
         bronze_exists = False
@@ -455,6 +548,7 @@ def run_all(enable_stats: bool = True) -> str:
             if silver_exists:
                 logger.info("Silver tables found -- building bronze via reverse-mapping")
                 _build_bronze_from_silver(con)
+                bronze_source = "reused_silver"
             else:
                 raise RuntimeError(
                     "Ni MySQL, ni bronze_productos, ni silver_dim_producto existen -- "
@@ -462,6 +556,7 @@ def run_all(enable_stats: bool = True) -> str:
                 )
         else:
             logger.info("Bronze tables already exist, skipping build")
+            bronze_source = "reused_bronze"
 
     # Stats: Bronze
     if stats_run_id is not None:
@@ -477,9 +572,17 @@ def run_all(enable_stats: bool = True) -> str:
     # Verifica que MySQL haya recibido ventas recientes.
     # Si la última venta es muy vieja, logea WARNING y envía alerta Telegram.
     try:
-        _check_data_freshness(con)
+        data_freshness = _record_bronze_source(
+            _check_data_freshness(con),
+            bronze_source,
+            bronze_build.warning,
+        )
     except Exception as exc:
         logger.warning("Data freshness check error: %s", exc)
+        data_freshness = DataFreshness(
+            status="unknown",
+            warning=f"Data freshness check failed: {exc}",
+        )
 
     # Paso 2: Silver
     logger.info("Running silver transformations...")
@@ -549,7 +652,13 @@ def run_all(enable_stats: bool = True) -> str:
             except Exception as exc:
                 logger.warning("No se pudo sumar rows_processed: %s", exc)
                 _total_rows = 0
-            complete_stats_run(stats_run_id, "success", rows_processed=_total_rows)
+            complete_stats_run(
+                stats_run_id,
+                "success",
+                rows_processed=_total_rows,
+                data_freshness_status=data_freshness.status,
+                data_freshness_warning=data_freshness.warning,
+            )
             logger.info("Stats capture run #%d complete (rows=%d)", stats_run_id, _total_rows)
         except Exception as exc:
             logger.warning("Gold stats capture failed: %s", exc)
