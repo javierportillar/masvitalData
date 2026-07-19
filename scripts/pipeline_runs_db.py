@@ -53,9 +53,28 @@ def _get_conn() -> duckdb.DuckDBPyConnection:
             duration_seconds INTEGER,
             rows_processed INTEGER,
             triggered_by VARCHAR NOT NULL,
-            error_message TEXT
+            error_message TEXT,
+            data_freshness_status VARCHAR,
+            data_freshness_warning TEXT
         )
     """)
+    # Forward-compatible migration for databases created before freshness
+    # metadata was introduced. Inspect first for DuckDB 1.2 compatibility.
+    run_columns = {
+        row[0]
+        for row in con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'app_pipeline_runs'"
+        ).fetchall()
+    }
+    if "data_freshness_status" not in run_columns:
+        con.execute(
+            "ALTER TABLE app_pipeline_runs ADD COLUMN data_freshness_status VARCHAR"
+        )
+    if "data_freshness_warning" not in run_columns:
+        con.execute(
+            "ALTER TABLE app_pipeline_runs ADD COLUMN data_freshness_warning TEXT"
+        )
     con.execute("""
         CREATE TABLE IF NOT EXISTS app_pipeline_steps (
             id INTEGER PRIMARY KEY,
@@ -152,8 +171,13 @@ def start_stats_run(pipeline_name: str = "run_all") -> int:
     return max_id
 
 
-def complete_stats_run(run_id: int, status: str = "success",
-                       rows_processed: int | None = None) -> None:
+def complete_stats_run(
+    run_id: int,
+    status: str = "success",
+    rows_processed: int | None = None,
+    data_freshness_status: str | None = None,
+    data_freshness_warning: str | None = None,
+) -> None:
     """Marca un pipeline run como completado.
 
     Calcula duration_seconds = NOW() - started_at automáticamente.
@@ -161,25 +185,26 @@ def complete_stats_run(run_id: int, status: str = "success",
     usar set_run_rows_processed después de capturar las stats.
     """
     con = _get_conn()
+    assignments = [
+        "finished_at = NOW()",
+        "status = ?",
+        "duration_seconds = CAST(EXTRACT(EPOCH FROM (NOW() - started_at)) AS INTEGER)",
+        "data_freshness_status = ?",
+        "data_freshness_warning = ?",
+    ]
+    params: list[object] = [
+        status,
+        data_freshness_status,
+        data_freshness_warning,
+    ]
     if rows_processed is not None:
-        con.execute(
-            """UPDATE app_pipeline_runs
-               SET finished_at = NOW(),
-                   status = ?,
-                   duration_seconds = CAST(EXTRACT(EPOCH FROM (NOW() - started_at)) AS INTEGER),
-                   rows_processed = ?
-               WHERE id = ?""",
-            [status, int(rows_processed), run_id],
-        )
-    else:
-        con.execute(
-            """UPDATE app_pipeline_runs
-               SET finished_at = NOW(),
-                   status = ?,
-                   duration_seconds = CAST(EXTRACT(EPOCH FROM (NOW() - started_at)) AS INTEGER)
-               WHERE id = ?""",
-            [status, run_id],
-        )
+        assignments.append("rows_processed = ?")
+        params.append(int(rows_processed))
+    params.append(run_id)
+    con.execute(
+        f"UPDATE app_pipeline_runs SET {', '.join(assignments)} WHERE id = ?",
+        params,
+    )
     con.commit()
     con.close()
 
