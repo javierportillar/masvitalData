@@ -21,6 +21,7 @@ import sys
 import urllib.request
 import urllib.error
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -307,6 +308,17 @@ def _build_bronze_from_silver(con: duckdb.DuckDBPyConnection) -> None:
 _MAX_DATA_AGE_HOURS = 18  # tolera cierre nocturno (~19:00 → ~13:00 del día siguiente)
 
 
+
+@dataclass(frozen=True)
+class DataFreshness:
+    """Structured freshness result persisted with the pipeline run."""
+
+    status: str
+    warning: str | None = None
+
+
+
+
 def _send_telegram_alert(message: str) -> None:
     """Envía una alerta a Telegram si el token y chat_id están configurados."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -330,7 +342,7 @@ def _send_telegram_alert(message: str) -> None:
         logger.warning("Telegram alert falló: %s", exc)
 
 
-def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
+def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> DataFreshness:
     """Verifica que las ventas en MySQL sean recientes y alerta si están viejas.
 
     Debe llamarse DESPUÉS de que bronze_facventas exista.
@@ -339,13 +351,15 @@ def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
         row = con.execute("SELECT MAX(fecfven) FROM bronze_facventas").fetchone()
         max_date_raw = row[0] if row and row[0] else None
     except Exception as exc:
-        logger.warning("DATA FRESHNESS: no se pudo leer bronze_facventas — %s", exc)
-        return
+        warning = f"No se pudo leer bronze_facventas: {exc}"
+        logger.warning("DATA FRESHNESS: %s", warning)
+        return DataFreshness(status="unknown", warning=warning)
 
     if max_date_raw is None:
-        logger.warning("DATA FRESHNESS: bronze_facventas está VACÍA — sin ventas en MySQL")
+        warning = "bronze_facventas está vacía; no hay ventas disponibles"
+        logger.warning("DATA FRESHNESS: %s", warning)
         _send_telegram_alert("⚠️ No hay ventas registradas en MySQL de MasVital")
-        return
+        return DataFreshness(status="empty", warning=warning)
 
     # Normalizar a datetime
     if isinstance(max_date_raw, str):
@@ -379,11 +393,13 @@ def _check_data_freshness(con: duckdb.DuckDBPyConnection) -> None:
             f"Revisar importación POS→MySQL en PC MasVital."
         )
         _send_telegram_alert(telegram_msg)
+        return DataFreshness(status="stale", warning=msg)
     else:
         logger.info(
             "DATA FRESHNESS OK: última venta %s (hace %.1fh)",
             max_date_raw, delta_hours,
         )
+        return DataFreshness(status="fresh")
 
 
 def _load_dotenv() -> None:
@@ -477,9 +493,13 @@ def run_all(enable_stats: bool = True) -> str:
     # Verifica que MySQL haya recibido ventas recientes.
     # Si la última venta es muy vieja, logea WARNING y envía alerta Telegram.
     try:
-        _check_data_freshness(con)
+        data_freshness = _check_data_freshness(con)
     except Exception as exc:
         logger.warning("Data freshness check error: %s", exc)
+        data_freshness = DataFreshness(
+            status="unknown",
+            warning=f"Data freshness check failed: {exc}",
+        )
 
     # Paso 2: Silver
     logger.info("Running silver transformations...")
@@ -549,7 +569,13 @@ def run_all(enable_stats: bool = True) -> str:
             except Exception as exc:
                 logger.warning("No se pudo sumar rows_processed: %s", exc)
                 _total_rows = 0
-            complete_stats_run(stats_run_id, "success", rows_processed=_total_rows)
+            complete_stats_run(
+                stats_run_id,
+                "success",
+                rows_processed=_total_rows,
+                data_freshness_status=data_freshness.status,
+                data_freshness_warning=data_freshness.warning,
+            )
             logger.info("Stats capture run #%d complete (rows=%d)", stats_run_id, _total_rows)
         except Exception as exc:
             logger.warning("Gold stats capture failed: %s", exc)
