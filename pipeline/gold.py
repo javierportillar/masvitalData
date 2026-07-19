@@ -31,6 +31,7 @@ def mart_ventas_diarias_sku(con: duckdb.DuckDBPyConnection) -> None:
             ON fvd.cod_bodega = db.cod_bodega
         WHERE fvd.business_date >= DATE '2020-01-01'
           AND fvd.business_date <= CURRENT_DATE
+          AND fv.estado_documento != 'A'
         GROUP BY fv.business_date, fvd.cod_producto, dp.nombre_producto, fvd.cod_bodega, db.nombre_bodega
     """)
 
@@ -132,6 +133,7 @@ def mart_cohortes_clientes(con: duckdb.DuckDBPyConnection) -> None:
             SELECT nit_cliente, MIN(business_date) AS first_date
             FROM silver_fact_ventas
             WHERE nit_cliente IS NOT NULL AND nit_cliente != ''
+              AND estado_documento != 'A'
             GROUP BY nit_cliente
         ),
         monthly AS (
@@ -142,6 +144,7 @@ def mart_cohortes_clientes(con: duckdb.DuckDBPyConnection) -> None:
                 COUNT(*) AS facturas
             FROM silver_fact_ventas fv
             WHERE fv.nit_cliente IS NOT NULL AND fv.nit_cliente != ''
+              AND fv.estado_documento != 'A'
             GROUP BY fv.nit_cliente, STRFTIME(fv.business_date, '%Y-%m-01')
         )
         SELECT
@@ -158,6 +161,15 @@ def mart_cohortes_clientes(con: duckdb.DuckDBPyConnection) -> None:
 def mart_productos_dormidos(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("""
         CREATE OR REPLACE TABLE gold_mart_productos_dormidos AS
+        WITH valid_sales_detail AS (
+            SELECT fvd.*
+            FROM silver_fact_ventas_detalle fvd
+            INNER JOIN silver_fact_ventas fv
+                ON fvd.num_documento = fv.num_documento
+                AND fvd.cod_clase = fv.cod_clase
+                AND fvd.business_date = fv.business_date
+            WHERE fv.estado_documento != 'A'
+        )
         SELECT
             dp.cod_producto,
             COALESCE(dp.nombre_producto, 'SIN NOMBRE') AS nom_producto,
@@ -167,7 +179,7 @@ def mart_productos_dormidos(con: duckdb.DuckDBPyConnection) -> None:
         FROM silver_dim_producto dp
         LEFT JOIN gold_mart_inventario_actual inv
             ON dp.cod_producto = inv.cod_producto
-        LEFT JOIN silver_fact_ventas_detalle fvd
+        LEFT JOIN valid_sales_detail fvd
             ON dp.cod_producto = fvd.cod_producto
         GROUP BY dp.cod_producto, dp.nombre_producto, inv.cantidad_actual
         HAVING dias_sin_venta > 90 OR dias_sin_venta IS NULL
@@ -177,12 +189,21 @@ def mart_productos_dormidos(con: duckdb.DuckDBPyConnection) -> None:
 def alertas_quiebre(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("""
         CREATE OR REPLACE TABLE gold_alertas_quiebre AS
-        WITH max_date AS (
-            SELECT MAX(business_date) AS max_bd FROM silver_fact_ventas_detalle
+        WITH valid_sales_detail AS (
+            SELECT fvd.*
+            FROM silver_fact_ventas_detalle fvd
+            INNER JOIN silver_fact_ventas fv
+                ON fvd.num_documento = fv.num_documento
+                AND fvd.cod_clase = fv.cod_clase
+                AND fvd.business_date = fv.business_date
+            WHERE fv.estado_documento != 'A'
+        ),
+        max_date AS (
+            SELECT MAX(business_date) AS max_bd FROM valid_sales_detail
         ),
         demanda_7d AS (
             SELECT cod_producto, SUM(cantidad) / 7.0 AS demanda_promedio
-            FROM silver_fact_ventas_detalle, max_date
+            FROM valid_sales_detail, max_date
             WHERE business_date >= max_date.max_bd - INTERVAL '7' DAY
             GROUP BY cod_producto
         ),
