@@ -257,9 +257,11 @@ def fact_inventario(con: duckdb.DuckDBPyConnection) -> None:
                 TRIM(sernum)                      AS num_serie,
                 TRIM(nomprod)                     AS nombre_producto,
                 TRIM(unimed)                      AS unidad_medida,
-                CAST(valor1 AS DOUBLE)            AS valor_costo,
-                CAST(valor2 AS DOUBLE)            AS valor_venta,
-                CAST(valor3 AS DOUBLE)            AS cantidad,
+                -- In MasVital's auxinventario export, valor1 is the stock
+                -- balance, valor2 is cost, and valor3 is sale price.
+                CAST(valor2 AS DOUBLE)            AS valor_costo,
+                CAST(valor3 AS DOUBLE)            AS valor_venta,
+                CAST(valor1 AS DOUBLE)            AS cantidad,
                 CAST(valor4 AS DOUBLE)            AS valor4,
                 CAST(valor5 AS DOUBLE)            AS valor5,
                 CASE
