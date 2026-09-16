@@ -143,6 +143,11 @@ def test_stockout_alerts_ignore_cancelled_sales_demand() -> None:
         con.execute("ALTER TABLE silver_dim_producto ADD COLUMN existencia DOUBLE")
         con.execute("UPDATE silver_dim_producto SET existencia = 5 WHERE cod_producto = 'SKU-1'")
         con.execute(
+            "CREATE TABLE gold_mart_inventario_actual "
+            "(cod_producto VARCHAR, cantidad_actual DOUBLE)"
+        )
+        con.execute("INSERT INTO gold_mart_inventario_actual VALUES ('SKU-1', 5)")
+        con.execute(
             """
             INSERT INTO silver_fact_ventas VALUES
                 ('VALIDA', 'FV', CURRENT_DATE, 'CLIENTE', 100.0, 'B'),
@@ -164,5 +169,35 @@ def test_stockout_alerts_ignore_cancelled_sales_demand() -> None:
             "FROM gold_alertas_quiebre WHERE sku = 'SKU-1'"
         ).fetchone()
         assert row == (1.0, 5, "media")
+    finally:
+        con.close()
+
+
+def test_stockout_alerts_use_the_inventory_mart_stock() -> None:
+    con = _sales_connection()
+    try:
+        con.execute("ALTER TABLE silver_dim_producto ADD COLUMN existencia DOUBLE")
+        con.execute("UPDATE silver_dim_producto SET existencia = 100 WHERE cod_producto = 'SKU-1'")
+        con.execute(
+            "CREATE TABLE gold_mart_inventario_actual "
+            "(cod_producto VARCHAR, cantidad_actual DOUBLE)"
+        )
+        con.execute("INSERT INTO gold_mart_inventario_actual VALUES ('SKU-1', 2)")
+        con.execute(
+            "INSERT INTO silver_fact_ventas VALUES "
+            "('VALIDA', 'FV', CURRENT_DATE, 'CLIENTE', 100.0, 'B')"
+        )
+        con.execute(
+            "INSERT INTO silver_fact_ventas_detalle VALUES "
+            "('VALIDA', 'FV', CURRENT_DATE, 'SKU-1', 'B-1', 7, 100, 0)"
+        )
+
+        gold.alertas_quiebre(con)
+
+        row = con.execute(
+            "SELECT stock_actual, dias_hasta_quiebre, urgencia "
+            "FROM gold_alertas_quiebre WHERE sku = 'SKU-1'"
+        ).fetchone()
+        assert row == (2.0, 2, "alta")
     finally:
         con.close()

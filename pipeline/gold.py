@@ -208,8 +208,12 @@ def alertas_quiebre(con: duckdb.DuckDBPyConnection) -> None:
             GROUP BY cod_producto
         ),
         stock_actual AS (
-            SELECT cod_producto, COALESCE(existencia, 0) AS stock
-            FROM silver_dim_producto
+            SELECT
+                dp.cod_producto,
+                COALESCE(inv.cantidad_actual, 0) AS stock
+            FROM silver_dim_producto dp
+            LEFT JOIN gold_mart_inventario_actual inv
+                ON inv.cod_producto = dp.cod_producto
         )
         SELECT
             sa.cod_producto AS sku,
