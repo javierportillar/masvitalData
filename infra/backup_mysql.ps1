@@ -14,8 +14,44 @@ param(
     [string]$User = "api_read",
     [string]$Password = "",
     [string]$Database = "",
-    [int]$RetentionDays = 14
+    [int]$RetentionDays = 14,
+    [switch]$Simular
 )
+
+# Modo simulacion: no hace dump ni borra nada, solo dice que archivos quedarian
+# fuera por antiguedad. Se usa para que el operador autorice la limpieza.
+function Get-BackupsVencidos {
+    param([string]$Dir, [int]$Dias, [string]$Excepto)
+
+    if (-not (Test-Path $Dir)) { return @() }
+    $limite = (Get-Date).AddDays(-$Dias)
+    # El fallback .NET comprime con GZipStream pero guarda con extension .zip:
+    # si la retencion mira solo *.sql.gz, esos archivos no se purgan nunca.
+    Get-ChildItem -Path $Dir -File |
+        Where-Object {
+            ($_.Extension -eq ".gz" -or $_.Extension -eq ".zip") -and
+            $_.LastWriteTime -lt $limite -and
+            $_.Name -ne $Excepto
+        } |
+        Sort-Object LastWriteTime
+}
+
+if ($Simular) {
+    $vencidos = @(Get-BackupsVencidos -Dir $BackupDir -Dias $RetentionDays -Excepto "")
+    Write-Host "MODO SIMULACION - no se borra nada."
+    Write-Host "Directorio: $BackupDir"
+    Write-Host "Retencion: $RetentionDays dias (corte: $((Get-Date).AddDays(-$RetentionDays).ToString('yyyy-MM-dd HH:mm')))"
+    if ($vencidos.Count -eq 0) {
+        Write-Host "  (ningun backup vencido: no borraria nada)"
+    } else {
+        foreach ($f in $vencidos) {
+            Write-Host ("  borraria: {0} | {1:N2} MB | {2}" -f $f.Name, ($f.Length / 1MB), $f.LastWriteTime.ToString("yyyy-MM-dd HH:mm"))
+        }
+        $mb = [math]::Round((($vencidos | Measure-Object Length -Sum).Sum) / 1MB, 2)
+        Write-Host ("  total: {0} archivo(s), {1} MB" -f $vencidos.Count, $mb)
+    }
+    exit 0
+}
 
 if (-not (Get-Command mysqldump -ErrorAction SilentlyContinue)) {
     Write-Error "mysqldump no encontrado. Verifica que MySQL este en el PATH."
@@ -131,13 +167,12 @@ if ($OutFile -like "*.gz" -and (Get-Command gzip -ErrorAction SilentlyContinue))
     }
 }
 
-# Limpiar backups antiguos
+# Limpiar backups antiguos (incluye los .zip del fallback .NET)
 Write-Host "Limpiando backups anteriores a $RetentionDays dias..."
-Get-ChildItem -Path $BackupDir -Filter "*.sql.gz" | Where-Object {
-    $_.LastWriteTime -lt (Get-Date).AddDays(-$RetentionDays)
-} | ForEach-Object {
-    Remove-Item $_.FullName -Force
-    Write-Host "  Eliminado: $($_.Name)"
+$vencidos = @(Get-BackupsVencidos -Dir $BackupDir -Dias $RetentionDays -Excepto (Split-Path $OutFile -Leaf))
+foreach ($f in $vencidos) {
+    Remove-Item $f.FullName -Force
+    Write-Host "  Eliminado: $($f.Name)"
 }
 
 Write-Host ""
