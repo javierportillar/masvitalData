@@ -29,7 +29,7 @@ function Get-BackupsVencidos {
     # si la retencion mira solo *.sql.gz, esos archivos no se purgan nunca.
     Get-ChildItem -Path $Dir -File |
         Where-Object {
-            ($_.Extension -eq ".gz" -or $_.Extension -eq ".zip") -and
+            ($_.Extension -eq ".gz" -or $_.Extension -eq ".zip" -or $_.Extension -eq ".sql") -and
             $_.LastWriteTime -lt $limite -and
             $_.Name -ne $Excepto
         } |
@@ -70,6 +70,9 @@ if (Test-Path $envFile) {
         }
     }
     if (-not $Password) { $Password = $env:MYSQL_PASSWORD }
+    # El usuario tambien sale del .env. Si solo se toma la contrasena, el dump
+    # intenta con el default api_read y falla con "Access denied" (visto 2026-10-23).
+    if (-not $PSBoundParameters.ContainsKey("User") -and $env:MYSQL_USER) { $User = $env:MYSQL_USER }
     if (-not $Database) { $Database = $env:MYSQL_DATABASE }
 }
 
