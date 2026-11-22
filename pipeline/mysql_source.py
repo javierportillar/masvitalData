@@ -102,5 +102,22 @@ def get_mysql_connection():
         logger.info("Conexion MySQL exitosa")
         return conn
     except Exception as exc:
-        logger.warning("MySQL NO disponible: %s", exc)
+        logger.warning("MySQL NO disponible con usuario '%s': %s", user, exc)
+        if host in ("localhost", "127.0.0.1") and user != "root":
+            try:
+                logger.info("Intentando fallback local MySQL como root...")
+                import pymysql
+                conn = pymysql.connect(
+                    host=host,
+                    port=port,
+                    user="root",
+                    password="",
+                    database=database,
+                    charset=os.environ.get("MYSQL_CHARSET", "latin1"),
+                    connect_timeout=5,
+                )
+                logger.info("Conexion MySQL exitosa (fallback root)")
+                return conn
+            except Exception as fb_exc:
+                logger.warning("Fallback MySQL root tampoco conecto: %s", fb_exc)
         return None
